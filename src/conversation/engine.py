@@ -154,6 +154,7 @@ async def process_turn(turn: TurnInput, db: AsyncSession) -> TurnOutput:
     recommendations = await build_recommendations(reasoning_output, rag_result)
 
     # ── 6 & 7. Build response from templates ──────────────────────────────────
+    recent_phrases = list(context.recent_phrases)
     response_text = build_response(
         reasoning=reasoning_output,
         recommendation=recommendations,
@@ -161,7 +162,9 @@ async def process_turn(turn: TurnInput, db: AsyncSession) -> TurnOutput:
         message_count=context.message_count,
         user_message=turn.user_message,
         short_response_streak=context.short_response_streak,
+        recent_phrases=recent_phrases,
     )
+    context.recent_phrases = recent_phrases[-10:]
     context.last_framework_used = reasoning_output.primary_framework.value
     input_tokens, output_tokens = 0, 0
 

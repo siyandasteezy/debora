@@ -51,6 +51,7 @@ async def load_context(session_id: uuid.UUID) -> ConversationContext:
         framework_scores=data.get("framework_scores", {}),
         last_framework_used=data.get("last_framework_used", ""),
         short_response_streak=data.get("short_response_streak", 0),
+        recent_phrases=data.get("recent_phrases", []),
     )
     for m in data.get("messages", []):
         ctx.messages.append(ContextMessage(**m))
@@ -69,6 +70,7 @@ async def save_context(session_id: uuid.UUID, context: ConversationContext) -> N
         "framework_scores": context.framework_scores,
         "last_framework_used": context.last_framework_used,
         "short_response_streak": context.short_response_streak,
+        "recent_phrases": context.recent_phrases,
         "messages": [
             {"role": m.role, "content": m.content, "message_id": m.message_id}
             for m in context.messages

@@ -33,6 +33,8 @@ class ConversationContext:
     last_framework_used: str = ""
     # How many consecutive short replies (<20 words) the user has sent
     short_response_streak: int = 0
+    # First 60 chars of recently used phrases — prevents repetition across turns
+    recent_phrases: list[str] = field(default_factory=list)
 
     def add_message(self, role: str, content: str, message_id: str | None = None) -> None:
         self.messages.append(ContextMessage(role=role, content=content, message_id=message_id))
