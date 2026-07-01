@@ -23,6 +23,16 @@ class Settings(BaseSettings):
     database_pool_size: int = 10
     database_max_overflow: int = 20
 
+    @field_validator("database_url", mode="before")
+    @classmethod
+    def normalise_db_url(cls, v: str) -> str:
+        # Render provides postgres:// or postgresql:// — force asyncpg driver
+        if v.startswith("postgres://"):
+            v = v.replace("postgres://", "postgresql+asyncpg://", 1)
+        elif v.startswith("postgresql://") and "+asyncpg" not in v:
+            v = v.replace("postgresql://", "postgresql+asyncpg://", 1)
+        return v
+
     # Redis
     redis_url: str = "redis://localhost:6379/0"
     redis_ttl_seconds: int = 3600
