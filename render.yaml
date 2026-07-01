@@ -28,7 +28,7 @@ services:
       - key: QDRANT_COLLECTION
         value: mental_health_knowledge
       - key: CORS_ORIGINS
-        value: '["https://debora.vercel.app"]'
+        value: '["https://debora-phi.vercel.app"]'
       - key: EMBEDDING_PROVIDER
         value: local
       - key: EMBEDDING_MODEL
