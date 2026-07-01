@@ -63,7 +63,9 @@ class Settings(BaseSettings):
     @classmethod
     def parse_cors(cls, v: str | list[str]) -> list[str]:
         if isinstance(v, str):
-            return [origin.strip() for origin in v.split(",")]
+            if not v.strip():
+                return ["http://localhost:3000"]
+            return [origin.strip() for origin in v.split(",") if origin.strip()]
         return v
 
     @property
