@@ -34,13 +34,13 @@ services:
       - key: EMBEDDING_MODEL
         value: all-MiniLM-L6-v2
 
+  - type: redis
+    name: mhe-redis
+    plan: free
+    ipAllowList: []
+
 databases:
   - name: mhe-postgres
     plan: free
     databaseName: mental_health_engine
     user: mhe_user
-
-  - name: mhe-redis
-    plan: free
-    type: redis
-    ipAllowList: []
