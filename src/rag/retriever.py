@@ -16,6 +16,7 @@ logger = get_logger(__name__)
 settings = get_settings()
 
 _qdrant: AsyncQdrantClient | None = None
+_qdrant_available: bool = False
 
 
 def get_qdrant() -> AsyncQdrantClient:
@@ -36,6 +37,9 @@ async def retrieve(
     min_score: float | None = None,
 ) -> list[SourceDocument]:
     """Dense vector retrieval with optional metadata filtering."""
+    if not _qdrant_available:
+        return []
+
     k = top_k or settings.rag_top_k
     threshold = min_score or settings.rag_similarity_threshold
     query_vector = await embed_text(query)
@@ -111,6 +115,7 @@ async def upsert_document(
 
 async def ensure_collection() -> None:
     """Create Qdrant collection if it does not exist."""
+    global _qdrant_available
     from qdrant_client.models import VectorParams
 
     from src.rag.embedder import EMBEDDING_DIM
@@ -124,3 +129,4 @@ async def ensure_collection() -> None:
             vectors_config=VectorParams(size=EMBEDDING_DIM, distance=Distance.COSINE),
         )
         logger.info("qdrant_collection_created", name=settings.qdrant_collection)
+    _qdrant_available = True
