@@ -117,12 +117,25 @@ async def process_turn(turn: TurnInput, db: AsyncSession) -> TurnOutput:
     if cross_session_summary:
         context.session_summary = cross_session_summary
 
+    # ── Engagement tracking: score the previous framework based on this reply ──
+    word_count = len(turn.user_message.split())
+    if context.last_framework_used:
+        engagement = min(1.0, word_count / 50.0)
+        scores = context.framework_scores.setdefault(context.last_framework_used, [])
+        scores.append(engagement)
+        context.framework_scores[context.last_framework_used] = scores[-10:]
+
+    context.short_response_streak = (
+        context.short_response_streak + 1 if word_count < 20 else 0
+    )
+
     # ── 3 & 4. Reasoning + RAG in parallel ────────────────────────────────────
     reasoning_task = asyncio.create_task(
         run_reasoning(
             user_message=turn.user_message,
             conversation_history=context.to_history_string(),
             message_count=context.message_count,
+            framework_scores=context.framework_scores,
         )
     )
 
@@ -146,7 +159,10 @@ async def process_turn(turn: TurnInput, db: AsyncSession) -> TurnOutput:
         recommendation=recommendations,
         stage=reasoning_output.conversation_stage,
         message_count=context.message_count,
+        user_message=turn.user_message,
+        short_response_streak=context.short_response_streak,
     )
+    context.last_framework_used = reasoning_output.primary_framework.value
     input_tokens, output_tokens = 0, 0
 
     if safety_result.disclaimer_needed:

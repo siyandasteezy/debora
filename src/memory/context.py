@@ -27,6 +27,13 @@ class ConversationContext:
     identified_strengths: list[str] = field(default_factory=list)
     stressors: list[str] = field(default_factory=list)
 
+    # Engagement learning — maps framework name → list of 0-1 engagement scores
+    framework_scores: dict[str, list[float]] = field(default_factory=dict)
+    # Framework used in the last assistant turn (for attribution on next user message)
+    last_framework_used: str = ""
+    # How many consecutive short replies (<20 words) the user has sent
+    short_response_streak: int = 0
+
     def add_message(self, role: str, content: str, message_id: str | None = None) -> None:
         self.messages.append(ContextMessage(role=role, content=content, message_id=message_id))
         # Trim to keep context manageable

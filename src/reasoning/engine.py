@@ -39,9 +39,30 @@ class ReasoningOutput:
     conversation_stage: str  # explore | deepen | reframe | action | support
 
 
+def _preferred_framework(
+    framework_scores: dict[str, list[float]],
+) -> TherapeuticFramework | None:
+    """Return the framework with highest average engagement after 3+ data points."""
+    averages = {
+        fw: sum(scores) / len(scores)
+        for fw, scores in framework_scores.items()
+        if len(scores) >= 3
+    }
+    if not averages:
+        return None
+    best_fw, best_avg = max(averages.items(), key=lambda x: x[1])
+    if best_avg < 0.45:
+        return None
+    try:
+        return TherapeuticFramework(best_fw)
+    except ValueError:
+        return None
+
+
 def _select_framework(
     emotion_analysis: EmotionThemeAnalysis,
     distortion_analysis: DistortionAnalysis,
+    framework_scores: dict[str, list[float]] | None = None,
 ) -> tuple[TherapeuticFramework, str]:
     """Rule-based framework selector. Returns (framework, rationale)."""
     distress = emotion_analysis.distress_level
@@ -50,7 +71,7 @@ def _select_framework(
     valence = emotion_analysis.overall_valence
     themes = set(emotion_analysis.themes)
 
-    # DBT: high distress + emotional intensity → distress tolerance first
+    # DBT: high distress + emotional intensity → distress tolerance first (safety-critical, never overridden)
     if distress >= 0.75:
         return (
             TherapeuticFramework.DBT,
@@ -82,12 +103,26 @@ def _select_framework(
 
     # Positive Psychology: low distress, building on strengths
     if distress < 0.35 and valence >= -0.2:
+        # If this user has engaged more with a different framework, use that instead
+        preferred = _preferred_framework(framework_scores or {})
+        if preferred and preferred not in (TherapeuticFramework.SUPPORTIVE,):
+            return (
+                preferred,
+                f"User has shown higher engagement with {preferred.value} — applying learned preference.",
+            )
         return (
             TherapeuticFramework.POSITIVE_PSYCHOLOGY,
             "Moderate distress with positive indicators — positive psychology can build on existing strengths.",
         )
 
-    # Default supportive: just listen and validate
+    # Default supportive — but defer to learned preference if available
+    preferred = _preferred_framework(framework_scores or {})
+    if preferred:
+        return (
+            preferred,
+            f"Applying {preferred.value} based on user's engagement history.",
+        )
+
     return (
         TherapeuticFramework.SUPPORTIVE,
         "Providing empathic supportive listening without framework imposition.",
@@ -113,6 +148,7 @@ async def run_reasoning(
     user_message: str,
     conversation_history: str = "",
     message_count: int = 1,
+    framework_scores: dict[str, list[float]] | None = None,
 ) -> ReasoningOutput:
     """Parallel analysis + framework selection."""
     emotion_task = asyncio.create_task(
@@ -126,7 +162,7 @@ async def run_reasoning(
         emotion_task, distortion_task
     )
 
-    framework, rationale = _select_framework(emotion_analysis, distortion_analysis)
+    framework, rationale = _select_framework(emotion_analysis, distortion_analysis, framework_scores)
     stage = _select_conversation_stage(emotion_analysis, message_count)
 
     framework_guidance = None
