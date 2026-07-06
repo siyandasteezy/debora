@@ -1,13 +1,19 @@
 """
-Rule-based response composer.
+Rule-based response composer implementing the 6-step conversation protocol:
+  1. Understand  — internal analysis (done by reasoning engine)
+  2. Validate    — acknowledge the emotion naturally
+  3. Explore     — one question, never an interrogation
+  4. Reflect     — brief summary of what was understood (turns 4+)
+  5. Help        — one practical idea, only after understanding is established
+  6. Collaborate — never tell; ask and invite
 
-Anti-repeat: every phrase picked from a pool is recorded in recent_phrases
-(passed in as a mutable list, modified in place). _pick() skips anything
-in that list, so no phrase repeats within a session unless all options
-are exhausted.
-
-No stage prefixes ("As we go deeper...") — they read like a script.
-Framework insights stand alone.
+Principles:
+  - No advice before turn 4
+  - One question per response, never stacked
+  - Permission-seek before giving suggestions
+  - Reflect before helping
+  - Anti-repeat: _pick() skips recently used phrases
+  - No stage prefixes, no self-help-book language
 """
 from __future__ import annotations
 
@@ -25,7 +31,6 @@ from src.recommendations.engine import Recommendation
 
 
 def _pick(pool: list[str], used: list[str]) -> str:
-    """Return a random item from pool not recently used. Records the choice in used."""
     keys = [p[:60] for p in used]
     available = [p for p in pool if p[:60] not in keys]
     choice = random.choice(available if available else pool)
@@ -33,366 +38,347 @@ def _pick(pool: list[str], used: list[str]) -> str:
     return choice
 
 
-# ── Empathetic openings ────────────────────────────────────────────────────────
-
-_EMPATHETIC_OPENINGS: dict[EmotionCategory, list[str]] = {
-    EmotionCategory.SADNESS: [
-        "I can hear how much pain you're carrying right now.",
-        "It sounds like you're going through something really heavy.",
-        "What you're describing sounds incredibly hard.",
-        "That kind of sadness can make everything feel heavier than it should.",
-        "There's real weight in what you're sharing.",
-        "Something in what you said tells me you've been hurting for a while.",
-        "That's a lot to be sitting with.",
-        "I hear the pain underneath what you're describing.",
-        "What you're going through sounds genuinely difficult.",
-        "That kind of hurt doesn't just go away on its own.",
-    ],
-    EmotionCategory.ANXIETY: [
-        "It sounds like your mind has been working overtime.",
-        "I can hear how much tension and uncertainty you're holding.",
-        "Living with that level of anxiety is genuinely exhausting.",
-        "That constant alertness wears on a person.",
-        "Anxiety has a way of making everything feel urgent at once.",
-        "It sounds like your nervous system has been in overdrive.",
-        "The worry you're describing sounds relentless.",
-        "That kind of underlying dread is really hard to carry.",
-        "When the mind won't slow down, everything feels harder than it needs to.",
-        "It makes sense that you're worn out — anxiety takes a lot out of you.",
-    ],
-    EmotionCategory.ANGER: [
-        "It sounds like you've reached a real breaking point.",
-        "That frustration makes a lot of sense given what you're describing.",
-        "I hear how much this has worn you down.",
-        "Anger like this usually means something important has been ignored for too long.",
-        "Something has crossed a line for you — and that matters.",
-        "It sounds like you've been patient with this for a long time.",
-        "The anger comes through clearly. It sounds justified.",
-        "There's a lot of energy behind what you're feeling.",
-        "It makes sense that you'd feel this way given everything.",
-        "That kind of frustration builds when things keep not changing.",
-    ],
-    EmotionCategory.HOPELESSNESS: [
-        "When hope feels this far away, everything takes so much more effort.",
-        "I hear how stuck and depleted you feel right now.",
-        "That kind of heaviness is real, and I'm glad you're talking about it.",
-        "That sense that nothing will change is one of the hardest things to sit with.",
-        "When the future feels closed off, even small things become difficult.",
-        "Hopelessness is exhausting in a way that's hard to describe to other people.",
-        "It sounds like you've been fighting this feeling for a while.",
-        "That emptiness you're describing — I hear it.",
-        "When you can't see a way forward, it's hard to take any step at all.",
-        "You're still here, still talking — that matters even when it doesn't feel like it.",
-    ],
-    EmotionCategory.OVERWHELM: [
-        "It sounds like there's just too much, and not enough of you to hold it all.",
-        "When everything piles up like this, it can feel impossible to find solid ground.",
-        "Too much at once, with no clear way through — that's exhausting.",
-        "It sounds like you've been running on empty for a while.",
-        "That feeling of being completely swamped is real.",
-        "Everything coming at once, with no pause — that takes a real toll.",
-        "It makes sense you feel overwhelmed. That's a lot for one person.",
-        "When there's no breathing room, even small things become too much.",
-        "You've been carrying more than your fair share.",
-        "That sense of being buried — I hear it in what you're saying.",
-    ],
-    EmotionCategory.LONELINESS: [
-        "That sense of being alone with all of this is one of the hardest things.",
-        "Feeling unseen and disconnected is a real kind of pain.",
-        "Going through hard things without someone to share it with makes everything harder.",
-        "Loneliness can sit right alongside a full life — it doesn't care how many people are around.",
-        "The ache of not being truly known by anyone — that's real.",
-        "It sounds like you've been carrying this alone for a long time.",
-        "Feeling like no one really understands is its own kind of grief.",
-        "That isolation you're describing sounds heavy.",
-        "Being in pain and feeling like there's no one to tell — that's a lot.",
-        "You reached out here, which tells me part of you is still looking for connection.",
-    ],
-    EmotionCategory.GRIEF: [
-        "Grief moves at its own pace, and what you're feeling is completely understandable.",
-        "Loss touches everything, doesn't it. I'm sorry you're going through this.",
-        "There's no right way to grieve, and what you're feeling is real.",
-        "Grief doesn't follow a schedule — and it's allowed to be messy.",
-        "That loss is still very present for you, I can hear it.",
-        "Grief has a way of resurfacing when you least expect it.",
-        "You're allowed to still be affected by this.",
-        "What you lost mattered. It makes sense this still hurts.",
-        "Grief is the cost of loving something. That doesn't make it easier.",
-        "There's no timeline on this — however long it takes is however long it takes.",
-    ],
-    EmotionCategory.SHAME: [
-        "Shame is one of the most isolating feelings — it tells us we're alone in what we feel.",
-        "I want you to know that feeling this way doesn't make it true.",
-        "Shame thrives in silence. The fact that you're speaking about it matters.",
-        "Carrying shame is exhausting. You don't have to hold that alone.",
-        "Shame distorts things — it makes us believe the worst about ourselves.",
-        "What you're describing sounds like shame, and shame lies.",
-        "A lot of people feel exactly what you're feeling. You're not the exception you think you are.",
-        "The fact that you feel shame tells me you care deeply about how you act. That's not nothing.",
-        "Shame keeps us small. You deserve more room than that.",
-        "You don't have to earn the right to feel okay about yourself.",
-    ],
-    EmotionCategory.GUILT: [
-        "It sounds like you've been holding yourself responsible for a lot.",
-        "Guilt can be a really heavy burden to carry.",
-        "I hear how much you're judging yourself right now.",
-        "Holding yourself to account is one thing — punishing yourself is another.",
-        "You've been carrying this for a while, haven't you.",
-        "There's a difference between taking responsibility and taking the blame for everything.",
-        "Guilt can keep us stuck in a loop of self-criticism.",
-        "It sounds like you've already paid a high price for whatever happened.",
-        "You're being much harder on yourself than you'd be on anyone else.",
-        "Whatever happened, I don't think you need to keep punishing yourself for it.",
-    ],
-    EmotionCategory.FRUSTRATION: [
-        "That frustration is completely understandable — hitting walls is draining.",
-        "I can hear how stuck you feel with this.",
-        "Feeling like nothing is working is genuinely exhausting.",
-        "When effort isn't producing results, frustration is the natural response.",
-        "It sounds like you've been trying, and it keeps not being enough.",
-        "That kind of friction — where things just won't move — wears on you.",
-        "The frustration makes total sense given what you've been through.",
-        "You've been pushing against something that won't give. That's tiring.",
-        "I hear the impatience in what you're saying. It makes sense.",
-        "Something that should be simpler keeps being difficult — of course that's frustrating.",
-    ],
-    EmotionCategory.JOY: [
-        "It's really good to hear some brightness in what you're sharing.",
-        "That sounds like a genuinely meaningful moment.",
-        "I'm glad something is bringing you some light right now.",
-        "Good moments matter — I'm glad this one landed.",
-        "Something good found you. That's worth noticing.",
-        "It's nice to hear that.",
-    ],
-    EmotionCategory.RELIEF: [
-        "I'm glad to hear some of that pressure has lifted.",
-        "Relief after a hard stretch is worth acknowledging.",
-        "That sounds like a weight off.",
-        "Good — some breathing room.",
-        "That shift matters, even if things aren't fully resolved.",
-    ],
-    EmotionCategory.NEUTRAL: [
-        "Thank you for sharing this with me.",
-        "I'm glad you felt you could bring this here.",
-        "I'm listening.",
-        "I hear you.",
-        "Tell me more.",
-        "I'm here.",
-        "Go on — I'm with you.",
-    ],
-}
-
-_DEFAULT_OPENINGS = [
-    "I hear you.",
-    "Thank you for sharing this.",
-    "I'm here.",
-    "Tell me more.",
-    "I'm listening.",
-    "Go ahead — I'm with you.",
-    "I'm glad you brought this here.",
-]
-
-# ── First-message welcomes ─────────────────────────────────────────────────────
+# ── Step 1 welcome (first message) ────────────────────────────────────────────
 
 _FIRST_MESSAGE_WELCOME = [
     (
         "Thank you for being here.\n\n"
-        "A lot of people find it hard to know where to start — and that's completely okay. "
-        "You don't need to have the words figured out.\n\n"
-        "What's been sitting with you most lately? It doesn't have to be the whole story — "
-        "just whatever feels closest to the surface right now."
+        "A lot of people find it hard to know where to start — that's completely okay. "
+        "You don't need to have it all figured out.\n\n"
+        "What's been sitting with you most lately?"
     ),
     (
-        "I'm really glad you reached out.\n\n"
+        "I'm glad you reached out.\n\n"
         "There's no right way to begin this, and no pressure to explain everything at once. "
-        "Whatever brought you here today is worth talking about.\n\n"
+        "Whatever brought you here is worth talking about.\n\n"
         "Where would you like to start?"
     ),
     (
-        "Welcome. I'm here, and I'm not going anywhere.\n\n"
+        "Welcome. I'm here and I'm not going anywhere.\n\n"
         "Sometimes it's hard to put what we're carrying into words — you don't have to have it "
-        "all figured out. We can work through it together.\n\n"
+        "all sorted. We can work through it together.\n\n"
         "What's been on your mind?"
     ),
     (
         "I'm glad you're here.\n\n"
-        "You don't have to come in with a clear explanation or a tidy summary of what's wrong. "
-        "A lot of people don't. Whatever you're feeling, we can start there.\n\n"
+        "You don't need a tidy explanation of what's wrong. "
+        "Whatever you're feeling, we can start there.\n\n"
         "What's going on for you right now?"
     ),
     (
         "Hello. Thank you for reaching out — it takes something to do that.\n\n"
-        "There's no rush here, and nothing you bring is too small or too complicated. "
-        "I'm just here to listen.\n\n"
+        "There's no rush here, and nothing you bring is too small or too complicated.\n\n"
         "What's been weighing on you?"
     ),
 ]
 
-# ── Stressor acknowledgments (varied templates) ────────────────────────────────
+# ── Step 2: Validate ───────────────────────────────────────────────────────────
+# Keyed by emotion. Short, natural, not overdone.
 
-_STRESSOR_ACK_TEMPLATES = [
-    "It sounds like {stressor} is weighing on you.",
-    "The weight of {stressor} comes through in what you're saying.",
-    "{stressor} — that's a real thing to be dealing with.",
-    "It makes sense that {stressor} would be so present for you right now.",
-    "Carrying {stressor} on top of everything else isn't easy.",
-    "Something about {stressor} feels like it's at the centre of this.",
-    "{stressor} is clearly taking up a lot of space right now.",
-    "It's clear that {stressor} has been on your mind.",
+_VALIDATION: dict[EmotionCategory, list[str]] = {
+    EmotionCategory.SADNESS: [
+        "That sounds really painful.",
+        "I can hear how heavy this has been.",
+        "That's a lot to carry.",
+        "That kind of hurt doesn't just go away on its own.",
+        "What you're going through sounds genuinely hard.",
+        "There's real weight in what you're sharing.",
+        "I can see why this has been weighing on you.",
+        "That makes a lot of sense, honestly.",
+        "Something in what you said tells me you've been hurting for a while.",
+        "It sounds exhausting.",
+    ],
+    EmotionCategory.ANXIETY: [
+        "That sounds exhausting — being on edge like that takes a real toll.",
+        "I can see why you'd be wound up about this.",
+        "Anxiety has a way of making everything feel urgent at once.",
+        "It makes sense that this has been sitting heavily.",
+        "Living with that kind of worry day to day is genuinely draining.",
+        "Your nervous system's been working overtime.",
+        "That constant alertness is tiring.",
+        "It makes sense you feel unsettled — that's a lot of uncertainty.",
+        "Being caught between all of that sounds really hard.",
+        "That underlying dread sounds relentless.",
+    ],
+    EmotionCategory.ANGER: [
+        "That frustration makes complete sense.",
+        "It sounds like you've been patient with this for a long time.",
+        "Something has crossed a line for you — and that matters.",
+        "I can see why you'd feel that way.",
+        "That kind of friction builds up.",
+        "There's a lot of energy behind what you're feeling — and it sounds justified.",
+        "It makes sense you'd reach a breaking point.",
+        "I hear how much this has worn you down.",
+        "Anger like that usually means something important's been ignored for too long.",
+        "That's a lot to have been holding.",
+    ],
+    EmotionCategory.HOPELESSNESS: [
+        "That sounds incredibly heavy.",
+        "I can hear how stuck you feel.",
+        "When things feel that closed off, everything becomes harder.",
+        "That kind of emptiness is real.",
+        "It makes sense that you'd feel depleted.",
+        "Hopelessness is exhausting in a way that's hard to describe to other people.",
+        "I hear you. That sounds really hard to sit with.",
+        "You're still here, still talking — that matters even when it doesn't feel like it.",
+        "When you can't see a way forward, it's hard to take any step at all.",
+        "That sense that nothing will change is one of the hardest things to sit with.",
+    ],
+    EmotionCategory.OVERWHELM: [
+        "That sounds like a lot for one person.",
+        "It makes sense you'd feel swamped.",
+        "When there's no breathing room, even small things become too much.",
+        "You've been carrying more than your fair share.",
+        "That's a lot coming at you at once.",
+        "Everything at once, with no pause — that takes a real toll.",
+        "I can see why this feels like too much.",
+        "It sounds like you've been running on empty.",
+        "That sense of being buried — I hear it.",
+        "Too much at once, with no clear way through. That's exhausting.",
+    ],
+    EmotionCategory.LONELINESS: [
+        "That kind of loneliness is its own kind of pain.",
+        "Going through something hard without someone to share it with makes everything heavier.",
+        "Feeling unseen is real — and it hurts.",
+        "It sounds like you've been carrying this alone for a while.",
+        "Loneliness can sit right alongside a full life. It doesn't care how many people are around.",
+        "Being in pain and feeling like there's no one to tell — that's a lot.",
+        "I can hear how isolated you've been feeling.",
+        "The ache of not being truly known — that's real.",
+        "It makes sense you'd feel disconnected.",
+        "You reached out here. Part of you is still looking for connection.",
+    ],
+    EmotionCategory.GRIEF: [
+        "I'm sorry. That's a real loss.",
+        "Grief doesn't follow a schedule. However long it takes is however long it takes.",
+        "What you lost mattered. It makes sense this still hurts.",
+        "There's no right way to grieve.",
+        "Loss touches everything, doesn't it.",
+        "Grief has a way of resurfacing when you least expect it.",
+        "You're allowed to still be affected by this.",
+        "Grief is the cost of loving something. That doesn't make it easier.",
+        "That loss is still very present for you — I can hear it.",
+        "I'm sorry you're going through this.",
+    ],
+    EmotionCategory.SHAME: [
+        "Shame is one of the most isolating things to carry.",
+        "I want you to know — feeling this way doesn't make it true.",
+        "Shame distorts things. It makes us believe the worst about ourselves.",
+        "That sounds really hard to sit with.",
+        "Carrying shame is exhausting. You don't have to hold it alone.",
+        "A lot of people feel exactly what you're feeling. You're not the exception you think you are.",
+        "Shame thrives in silence. The fact that you're speaking about it matters.",
+        "You don't have to earn the right to feel okay about yourself.",
+        "What you're describing sounds like shame, and shame lies.",
+        "That's a heavy thing to be carrying.",
+    ],
+    EmotionCategory.GUILT: [
+        "It sounds like you've been really hard on yourself about this.",
+        "That's a heavy thing to be sitting with.",
+        "There's a difference between taking responsibility and punishing yourself.",
+        "I can hear how much you're judging yourself.",
+        "You've been carrying this for a while, haven't you.",
+        "It sounds like you've already paid a high price for whatever happened.",
+        "You're being much harder on yourself than you'd be on anyone else.",
+        "Guilt can keep us stuck in a loop of self-criticism.",
+        "I hear how much this is weighing on you.",
+        "That sounds exhausting — holding yourself responsible for that.",
+    ],
+    EmotionCategory.FRUSTRATION: [
+        "That frustration makes complete sense.",
+        "Hitting the same wall over and over is draining.",
+        "When effort isn't producing results, of course you'd feel frustrated.",
+        "It sounds like you've been trying, and it keeps not being enough.",
+        "I can hear how stuck you feel.",
+        "That kind of friction wears on you.",
+        "The frustration sounds completely justified.",
+        "You've been pushing against something that won't give.",
+        "I can see why you'd be at your limit with this.",
+        "Something that should be simpler keeps being difficult — of course that's frustrating.",
+    ],
+    EmotionCategory.JOY: [
+        "That's really good to hear.",
+        "That sounds like a meaningful moment.",
+        "Good — something is working.",
+        "I'm glad something is bringing you some light.",
+        "That's worth holding onto.",
+    ],
+    EmotionCategory.RELIEF: [
+        "I'm glad some of that pressure has lifted.",
+        "That sounds like a weight off.",
+        "Good — some breathing room.",
+        "That shift matters.",
+    ],
+    EmotionCategory.NEUTRAL: [
+        "I hear you.",
+        "Thanks for sharing that.",
+        "Tell me more.",
+        "I'm listening.",
+        "Go on.",
+        "I'm with you.",
+    ],
+}
+
+_DEFAULT_VALIDATION = [
+    "I hear you.",
+    "That makes sense.",
+    "Thanks for sharing that.",
+    "I'm listening.",
+    "I'm with you.",
 ]
 
-# ── Reflection templates (varied) ─────────────────────────────────────────────
+# ── Step 3: Explore — one question only ───────────────────────────────────────
 
-_REFLECTION_TEMPLATES = [
-    'When you say "{phrase}" — I want to make sure I understand what that\'s like for you.',
-    '"{phrase}" — can you tell me more about that?',
-    'Something about "{phrase}" stands out to me. What does that mean for you right now?',
-    'I heard "{phrase}" and I don\'t want to rush past it.',
-    'That phrase — "{phrase}" — I\'d like to stay with that for a moment.',
-    '"{phrase}" — that\'s a real thing to be feeling.',
-    'I noticed "{phrase}". What\'s underneath that?',
-    'When you say "{phrase}", what does that actually feel like day to day?',
-]
-
-# ── Opening-up mode (short/closed responses) ──────────────────────────────────
-
-_OPEN_UP_REFLECTIONS = [
-    "It sounds like there might be more beneath what you just said — and that's okay.",
-    "Sometimes the hardest things to talk about are the ones that matter most.",
-    "A lot can hide inside a short answer.",
-    "You don't have to have it all figured out before you speak.",
-    "Whatever you're holding, you can bring it here at whatever pace feels right.",
-    "It's okay if the words are hard to find right now.",
-    "You don't have to give me the full picture all at once.",
-    "Sometimes it helps just to say the messy version.",
-    "There's no wrong way to talk about this.",
-    "Take your time. I'm not going anywhere.",
-]
-
-_PARTIAL_DISCLOSURE_INVITES = [
-    (
-        "You don't need to share more than feels right. "
-        "But if there's a bit more to it — I'm here, and there's no rush."
-    ),
-    (
-        "You can take this one small piece at a time. "
-        "Even just naming what it feels like in your body — tight, heavy, hollow — "
-        "can be a place to start."
-    ),
-    (
-        "There's no pressure to get to the main thing straightaway. "
-        "What's one small detail about what's going on that you haven't said yet?"
-    ),
-    (
-        "We don't have to go anywhere in a hurry. "
-        "Sometimes just sitting with something out loud is enough for now."
-    ),
-    (
-        "You can say as little or as much as you want. "
-        "Even 'I don't know where to start' is a perfectly fine place to begin."
-    ),
-    (
-        "If there are words you can't quite find yet, that's okay. "
-        "Sometimes it helps to describe it around the edges — what it feels like, "
-        "rather than what it is."
-    ),
-]
-
-_GENTLE_REOPEN_QUESTIONS = [
-    "What does a typical day feel like for you right now?",
-    "When did things start feeling this way — was there a moment, or did it creep up gradually?",
-    "What does it feel like in your body when this comes up?",
+_EXPLORE_EARLY = [
+    "What's been the hardest part of this for you?",
+    "When did things start feeling this way?",
+    "What does this feel like day to day?",
     "Is there anyone in your life who knows you're feeling this way?",
-    "What have you already tried, even if it didn't fully work?",
-    "What would 'a little bit better' actually look like for you?",
-    "What's the part of this that's hardest to say out loud?",
-    "When did you last feel okay — genuinely okay?",
-    "What does this feel like at its worst?",
-    "Is there something specific that happened recently, or has this been building?",
-    "What's the thing you haven't been able to tell anyone else?",
+    "What does it feel like in your body when this comes up?",
     "How long have you been carrying this?",
+    "Was there a moment when things shifted, or did it creep up gradually?",
+    "What's the thing that's been hardest to say out loud about this?",
+    "What's been going on recently that's made this feel more present?",
+    "What do you think is underneath all of this?",
+    "When did you last feel okay — genuinely okay?",
+    "What does a typical day look like for you right now?",
 ]
 
-# ── Normal follow-up questions ────────────────────────────────────────────────
-
-_FOLLOW_UP_QUESTIONS = [
-    "What feels most pressing for you right now?",
-    "Is there a part of this you'd like to go into more?",
-    "What would feel most useful — talking through what happened, or thinking about what to do next?",
-    "What do you need most right now — to be heard, or to think through what to do?",
-    "When this comes up, where do you notice it most — in your thoughts, your body, or your relationships?",
-    "What do you think has been making this harder recently?",
-    "What's the part of this that keeps coming back to you?",
-    "Has anything shifted for you since this started?",
-    "What does your gut tell you about what you need right now?",
+_EXPLORE_DEEPER = [
+    "What part of this is weighing on you most right now?",
+    "Is there something specific that keeps coming back to you about this?",
+    "What have you already tried, even if it didn't fully work?",
+    "What do you think you actually need right now?",
+    "What would 'a little bit better' look like for you?",
+    "What feels most stuck?",
+    "What do you think is keeping this from shifting?",
     "Is there anything you've been avoiding thinking about?",
     "What would you say to a close friend going through exactly this?",
-    "Is there a small thing that's made any of this easier, even briefly?",
-    "What feels true about what you just shared?",
-    "What else is going on that I should know about?",
+    "What does your gut tell you about what needs to change?",
+    "Has anything made this slightly easier, even briefly?",
+    "What feels true about what you just said?",
 ]
+
+# ── Step 3 (open-up mode): user is giving very short replies ──────────────────
+
+_OPEN_UP_VALIDATES = [
+    "It sounds like there might be more beneath that — and that's okay.",
+    "Sometimes the hardest things to talk about are the ones that matter most.",
+    "You don't have to have it all figured out before you speak.",
+    "Whatever you're holding, you can bring it here at your own pace.",
+    "It's okay if the words are hard to find right now.",
+    "There's no wrong way to talk about this.",
+    "You can say as little or as much as you want.",
+    "Sometimes just saying the messy version is enough.",
+    "Take your time. I'm not going anywhere.",
+    "A lot can hide inside a short answer.",
+]
+
+_OPEN_UP_INVITES = [
+    "You don't need to share more than feels right. But if there's more to it — I'm here.",
+    "You can take this one piece at a time. Even just naming what it feels like in your body can be a place to start.",
+    "We don't have to go anywhere in a hurry. Sometimes just sitting with something out loud is enough.",
+    "Even 'I don't know where to start' is a perfectly fine place to begin.",
+    "If the words aren't there yet, you could try describing it around the edges — what it feels like, rather than what it is.",
+    "There's no pressure to get to the main thing straightaway.",
+    "You can say as little as you need to. I'll work with whatever you give me.",
+]
+
+_OPEN_UP_QUESTIONS = [
+    "What does a typical day feel like for you right now?",
+    "When did things start feeling this way?",
+    "What does it feel like in your body when this comes up?",
+    "What's the part of this that's hardest to say out loud?",
+    "When did you last feel okay — genuinely okay?",
+    "Is there something specific that happened recently, or has this been building?",
+    "How long have you been carrying this?",
+    "What's the thing you haven't been able to tell anyone else?",
+    "What does this feel like at its worst?",
+    "Is there anyone who knows what you're going through?",
+]
+
+# ── Step 4: Reflect — brief summary before helping ────────────────────────────
+
+_REFLECT_TEMPLATES = [
+    "So if I'm understanding right — {summary}. Does that sound accurate?",
+    "Let me make sure I've got this right. {summary}. Is that close?",
+    "From what you've shared — {summary}. Does that feel like a fair picture?",
+    "It sounds like {summary}. Am I getting that right?",
+    "What I'm hearing is {summary}. Tell me if I'm missing something.",
+]
+
+# ── Step 5: Help — permission-seeking before advice ───────────────────────────
+
+_PERMISSION_ASKS = [
+    "Would it be okay if I shared something that sometimes helps with this kind of thing?",
+    "There's something that research suggests might be useful here — would it help to hear it?",
+    "Can I offer one idea? You don't have to take it.",
+    "Would it help if we explored something practical together?",
+    "There's an approach that tends to work for situations like this — want to hear it?",
+    "I've got one thought — would it be okay to share it?",
+]
+
+_REC_INTROS = [
+    "Something that tends to help with this:",
+    "One thing that's worked for others in similar situations:",
+    "A small thing worth trying:",
+    "Research points to something practical here:",
+    "One idea — take it or leave it:",
+    "Something concrete that might make a difference:",
+]
+
+# ── Step 6: Collaborate ────────────────────────────────────────────────────────
+
+_COLLABORATE = [
+    "Does that sound like something worth exploring?",
+    "What do you think — does any part of that feel relevant to you?",
+    "Would it help if we looked at that together?",
+    "What feels realistic from where you're standing right now?",
+    "Does that resonate at all?",
+    "What do you think would make this even slightly easier?",
+    "Is there a version of that that would work for you?",
+    "What's your gut reaction to that?",
+    "Does that land, or does it feel off?",
+    "What feels most true about that?",
+]
+
+# ── Supportive closes (no question) ───────────────────────────────────────────
 
 _SUPPORTIVE_CLOSING = [
     "I'm here. Keep going.",
-    "You don't have to figure all of this out at once.",
-    "Take whatever time you need.",
+    "You don't have to figure this out today.",
+    "Take your time. I'm with you.",
     "Whatever you're feeling, you can bring it here.",
     "You're not carrying this alone right now.",
-    "None of this has to be resolved today.",
     "I'm glad you're talking about this.",
     "You've shared something important. I hear it.",
-    "There's no rush. I'm with you.",
-    "Keep going — I'm listening.",
+    "None of this has to be resolved today.",
     "That took something to say. I appreciate you trusting me with it.",
     "I'm not going anywhere.",
+    "I hear you.",
+    "Keep going — I'm listening.",
 ]
 
-# ── Recommendation intro variety ──────────────────────────────────────────────
+# ── Reflection helpers ─────────────────────────────────────────────────────────
 
-_REC_INTROS = [
-    "One thing that research supports for situations like this:",
-    "Something that's helped others in similar situations:",
-    "There's an approach that might be worth trying:",
-    "A technique that can make a real difference here:",
-    "Research points to something practical for this:",
-    "Something concrete you might find useful:",
-    "This is something that tends to help with what you're describing:",
-]
-
-
-# ── Helpers ───────────────────────────────────────────────────────────────────
-
-def _opening(emotion: DetectedEmotion | None, used: list[str]) -> str:
-    if emotion is None:
-        return _pick(_DEFAULT_OPENINGS, used)
-    pool = _EMPATHETIC_OPENINGS.get(emotion.category, _DEFAULT_OPENINGS)
-    return _pick(pool, used)
-
-
-def _stressor_ack(stressor: str, used: list[str]) -> str:
-    template = _pick(_STRESSOR_ACK_TEMPLATES, used)
-    return template.format(stressor=stressor)
-
-
-def _reflect_message(user_message: str, used: list[str]) -> str:
-    sentences = re.split(r'[.!?]+', user_message.strip())
-    sentences = [s.strip() for s in sentences if len(s.strip()) > 8]
-    if not sentences:
-        return ""
-    raw = sentences[0].lower()
-    raw = re.sub(r"^i\s+(feel|am|have|was|don't|cant|can't|just)\s+", '', raw)
-    raw = raw[:100].strip()
-    if not raw:
-        return ""
-    template = _pick(_REFLECTION_TEMPLATES, used)
-    result = template.format(phrase=raw)
-    return result
+def _build_reflect_summary(reasoning: ReasoningOutput) -> str:
+    parts = []
+    emotions = reasoning.emotion_analysis.primary_emotions[:2]
+    if emotions:
+        emotion_words = " and ".join(e.category.value for e in emotions)
+        parts.append(f"you've been feeling {emotion_words}")
+    stressors = reasoning.emotion_analysis.stressors[:1]
+    if stressors:
+        parts.append(f"and {stressors[0]} has been a big part of that")
+    themes = reasoning.emotion_analysis.themes[:2]
+    if themes and not stressors:
+        parts.append(f"and there's something around {' and '.join(themes)}")
+    return ", ".join(parts) if parts else "this has been weighing on you"
 
 
 def _framework_insight(reasoning: ReasoningOutput) -> str:
     g = reasoning.framework_guidance
     fw = reasoning.primary_framework
-
     if fw == TherapeuticFramework.SUPPORTIVE or g is None:
         return ""
     if isinstance(g, CBTGuidance):
@@ -412,16 +398,37 @@ def _framework_insight(reasoning: ReasoningOutput) -> str:
     return ""
 
 
+def _reflect_user_phrase(user_message: str, used: list[str]) -> str:
+    sentences = re.split(r'[.!?]+', user_message.strip())
+    sentences = [s.strip() for s in sentences if len(s.strip()) > 8]
+    if not sentences:
+        return ""
+    raw = sentences[0].lower()
+    raw = re.sub(r"^i\s+(feel|am|have|was|don't|cant|can't|just)\s+", '', raw)
+    raw = raw[:90].strip()
+    if not raw:
+        return ""
+    templates = [
+        f'When you say "{raw}" — can you tell me more about that?',
+        f'"{raw.capitalize()}" — what does that feel like day to day?',
+        f'I noticed "{raw}". What\'s underneath that?',
+        f'That phrase — "{raw}" — I don\'t want to rush past it.',
+        f'Something about "{raw}" feels important. What does that mean for you?',
+        f'I heard "{raw}" and I\'d like to stay with that a moment.',
+    ]
+    return _pick(templates, used)
+
+
 def _recommendation_snippet(rec: Recommendation, used: list[str]) -> str:
     if not rec.strategies:
         return ""
     s = rec.strategies[0]
-    short_instructions = s.instructions[:180] + "…" if len(s.instructions) > 180 else s.instructions
+    short = s.instructions[:160] + "…" if len(s.instructions) > 160 else s.instructions
     intro = _pick(_REC_INTROS, used)
-    return f"{intro} **{s.name}** — {short_instructions}"
+    return f"{intro} **{s.name}** — {short}"
 
 
-# ── Main response builder ─────────────────────────────────────────────────────
+# ── Main builder ──────────────────────────────────────────────────────────────
 
 def build_response(
     reasoning: ReasoningOutput,
@@ -433,65 +440,77 @@ def build_response(
     recent_phrases: list[str] | None = None,
 ) -> str:
     used: list[str] = recent_phrases if recent_phrases is not None else []
-
-    # ── First message ──────────────────────────────────────────────────────────
-    if message_count <= 1:
-        choice = _pick(_FIRST_MESSAGE_WELCOME, used)
-        return choice
-
-    parts: list[str] = []
     emotion = reasoning.emotion_analysis.top_emotion
+    parts: list[str] = []
 
-    # ── Empathetic opening ─────────────────────────────────────────────────────
-    parts.append(_opening(emotion, used))
+    # ── Turn 1: Welcome only ───────────────────────────────────────────────────
+    if message_count <= 1:
+        return _pick(_FIRST_MESSAGE_WELCOME, used)
 
-    # ── Stressor acknowledgment ────────────────────────────────────────────────
-    stressors = reasoning.emotion_analysis.stressors[:1]
-    if stressors:
-        parts.append(_stressor_ack(stressors[0], used))
-
-    # ── Reflective listening (first 5 turns, only for substantive messages) ────
-    if user_message and message_count <= 5 and len(user_message.split()) >= 8:
-        reflection = _reflect_message(user_message, used)
-        if reflection:
-            parts.append(reflection)
-
-    # ── Open-up mode: user has given 2+ short replies in a row ────────────────
+    # ── Open-up mode: user giving very short replies ───────────────────────────
     if short_response_streak >= 2:
-        parts.append(_pick(_OPEN_UP_REFLECTIONS, used))
-        parts.append(_pick(_PARTIAL_DISCLOSURE_INVITES, used))
-        parts.append(_pick(_GENTLE_REOPEN_QUESTIONS, used))
+        parts.append(_pick(_OPEN_UP_VALIDATES, used))
+        parts.append(_pick(_OPEN_UP_INVITES, used))
+        parts.append(_pick(_OPEN_UP_QUESTIONS, used))
         return "\n\n".join(p for p in parts if p.strip())
 
-    # ── Framework insight (not every turn — skip occasionally to avoid feeling scripted)
-    if message_count > 1:
-        insight = _framework_insight(reasoning)
-        # Skip 30% of the time on even turns to vary the rhythm
-        if insight and not (message_count % 2 == 0 and random.random() < 0.3):
-            parts.append(insight)
+    # ── Step 2: Validate ───────────────────────────────────────────────────────
+    pool = _VALIDATION.get(emotion.category if emotion else EmotionCategory.NEUTRAL, _DEFAULT_VALIDATION)
+    parts.append(_pick(pool, used))
 
-    # ── Practical recommendation (from message 3 onwards, only when user is sharing)
-    if message_count >= 3 and short_response_streak == 0 and recommendation.strategies:
+    # ── Step 3: Explore — one question or reflection ───────────────────────────
+    # On first short reply, gently invite more before asking
+    if short_response_streak == 1:
+        parts.append(_pick(_OPEN_UP_INVITES, used))
+        parts.append(_pick(_OPEN_UP_QUESTIONS, used))
+        return "\n\n".join(p for p in parts if p.strip())
+
+    # Reflect a phrase from the user's message (turns 2-5, substantive messages)
+    if user_message and message_count <= 5 and len(user_message.split()) >= 8:
+        reflection = _reflect_user_phrase(user_message, used)
+        if reflection:
+            parts.append(reflection)
+            return "\n\n".join(p for p in parts if p.strip())
+
+    # Ask one explore question (no advice yet before turn 4)
+    if message_count <= 3:
+        parts.append(_pick(_EXPLORE_EARLY, used))
+        return "\n\n".join(p for p in parts if p.strip())
+
+    # ── Step 4: Reflect (turns 4-5) ───────────────────────────────────────────
+    if message_count in (4, 5):
+        summary = _build_reflect_summary(reasoning)
+        template = _pick(_REFLECT_TEMPLATES, used)
+        parts.append(template.format(summary=summary))
+        # Add one deeper explore question after reflecting
+        parts.append(_pick(_EXPLORE_DEEPER, used))
+        return "\n\n".join(p for p in parts if p.strip())
+
+    # ── Step 5 + 6: Help + Collaborate (turn 6+) ──────────────────────────────
+    # Framework insight (not every turn — skip 25% of the time to vary rhythm)
+    insight = _framework_insight(reasoning)
+    if insight and random.random() > 0.25:
+        parts.append(insight)
+
+    # Permission-seek before offering a recommendation
+    if recommendation.strategies:
+        parts.append(_pick(_PERMISSION_ASKS, used))
         snippet = _recommendation_snippet(recommendation, used)
         if snippet:
             parts.append(snippet)
-
-    # ── Psychoeducation from RAG ───────────────────────────────────────────────
-    if recommendation.psychoeducation and short_response_streak == 0:
-        edu = recommendation.psychoeducation[:250].strip()
-        if edu:
-            parts.append(f"*Worth knowing:* {edu}")
-
-    # ── Closing: question or supportive statement ──────────────────────────────
-    if short_response_streak == 1:
-        parts.append(_pick(_GENTLE_REOPEN_QUESTIONS, used))
-    elif reasoning.primary_framework == TherapeuticFramework.SUPPORTIVE or message_count <= 3:
-        parts.append(_pick(_FOLLOW_UP_QUESTIONS, used))
+        # Collaborative close
+        parts.append(_pick(_COLLABORATE, used))
     else:
-        # Alternate between a question and a supportive statement
+        # No recommendation — supportive close or deeper question
         if message_count % 2 == 0:
-            parts.append(_pick(_FOLLOW_UP_QUESTIONS, used))
+            parts.append(_pick(_EXPLORE_DEEPER, used))
         else:
             parts.append(_pick(_SUPPORTIVE_CLOSING, used))
+
+    # Psychoeducation from RAG (if available and not too much already)
+    if recommendation.psychoeducation and len(parts) < 4:
+        edu = recommendation.psychoeducation[:200].strip()
+        if edu:
+            parts.append(f"*Worth knowing:* {edu}")
 
     return "\n\n".join(p for p in parts if p.strip())
